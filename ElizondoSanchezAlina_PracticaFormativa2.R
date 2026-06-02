@@ -1,136 +1,192 @@
 # Universidad Estatal a Distancia
 # Carrera de Sistemas de Información en Salud
 # 03576-3-2026 Investigación en Sistemas de Información en Salud II
-# Práctica Formativa U2. Gráfico tipo mapa de calor o Heatmap
+# Práctica Formativa U3. Muestreo aleatorio simple y estratificado
 # Programador: Lic. Iván M. Rodríguez Soriano
-# Versión: 1.0 (2026/02/28)
-###################################################################
-#Modificaciones por
+# Versión: 1.0 (2026/03/14)
+
 #Estudiante: Alina Elizondo Sánchez
-###################################################################
 
-# Instalación (si hace falta) y carga de paquetes
-# tidyverse: manipulación y visualización de datos (ggplot2, dplyr, tidyr, etc.)
-# scales: formato de etiquetas (porcentajes, moneda, escalas)
-# lubridate: manejo de fechas y horas
-# viridis: paleta de colores
+# Objetivos:
+# 1) Simular una población con variables relevantes
+# 2) Extraer una muestra aleatoria simple con sample()
+# 3) Extraer una muestra estratificada con dplyr
+# 4) Comparar composición de población y muestras
 
-packages <- c("tidyverse", "lubridate", "scales", "viridis")
+# 0) Preparación del entorno
 
-to_install <- packages[!packages %in% installed.packages()[, "Package"]]
-if (length(to_install)) install.packages(to_install, dependencies = TRUE)
+# Instala dplyr si no lo tienes (ejecutar UNA sola vez)
+# install.packages("dplyr")
 
-library(tidyverse)
-library(scales)
-library(lubridate)
+library(dplyr)
 
-# Generación de datos simulados
-set.seed(123) # reproducibilidad
+# Función auxiliar para mostrar proporciones de forma cómoda
+prop_tab <- function(x) round(prop.table(table(x)), 4)
 
-# Parámetros para el mapa de calor (cruce de región por semana)
-n_regiones <- 10
-n_semanas  <- 14
-edad_levels <- c("0-14", "15-39", "40-64", "65+")
 
-regiones <- paste0("Region_", str_pad(1:n_regiones, 2, pad = "0"))
+# 1) Simulación de la población
+# Simular una población de 1000 personas con las siguientes variables:
+# id (único), edad (18-85), sexo (Femenino/Masculino), region (Urbana/Rural)
 
-# Generar semanas (usamos lunes como inicio para agrupar)
-fecha_inicio <- as.Date("2025-01-06") # lunes
-semanas <- seq.Date(from = fecha_inicio, by = "week", length.out = n_semanas)
+set.seed(123)  # Reproducibilidad
 
-# Definimos la población por región (este dato es fijo por región)
-poblacion_region <- tibble(
-  region = regiones,
-  poblacion = round(runif(n_regiones, min = 50000, max = 350000))
+poblacion <- data.frame(
+  id     = 1:1000,
+  edad   = sample(18:85, 1000, replace = TRUE),
+  sexo   = sample(c("Femenino", "Masculino"), 1000, replace = TRUE),
+  region = sample(c("Urbana", "Rural"), 1000, replace = TRUE, prob = c(0.65, 0.35))
 )
 
-# Efecto regional (riesgo relativo): algunas regiones más "calientes"
-efecto_region <- tibble(
-  region = regiones,
-  rr_region = exp(rnorm(n_regiones, mean = 0, sd = 0.35))
-)
+cat('Población de estudio')
+str(poblacion)
 
-# Efecto por edad (mayor riesgo en mayores, por ejemplo)
-efecto_edad <- tibble(
-  edad = factor(edad_levels, levels = edad_levels),
-  rr_edad = c(0.7, 1.0, 1.2, 1.8)
-)
+cat("\nPoblación total")
+print(prop_tab(poblacion$region))
+print(prop_tab(poblacion$sexo))
+print(mean(poblacion$edad))
 
-# Estacionalidad: pico hacia el centro del periodo
-# (curva tipo campana sobre semanas)
-idx <- 1:n_semanas
-season <- tibble(
-  semana = semanas,
-  rr_season = 0.6 + 1.6 * dnorm(idx, mean = (n_semanas+1)/2, sd = n_semanas/5)
-  / max(dnorm(idx, mean=(n_semanas+1)/2, sd=n_semanas/5))
-)
+################################################################################
+# 2) Muestreo aleatorio simple (MAS)
+# Extraer una muestra aleatoria simple de n = 100 usando sample()
 
-# Base de simulación por región-semana-edad
-base <- expand_grid(
-  region = regiones,
-  semana = semanas,
-  edad = factor(edad_levels, levels = edad_levels)
-) %>%
-  left_join(poblacion_region, by = "region") %>%
-  left_join(efecto_region, by = "region") %>%
-  left_join(efecto_edad, by = "edad") %>%
-  left_join(season, by = "semana")
+set.seed(456)
 
-# Tasa base semanal (por persona) ~ ajustable
-tasa_base <- 8 / 100000  # 8 por 100k por semana como baseline
+muestra_simple <- poblacion[
+  sample(nrow(poblacion), size = 100),
+]
 
-# Media esperada de casos (lambda Poisson)
-sim <- base %>%
-  mutate(
-    lambda = poblacion * tasa_base * rr_region * rr_edad * rr_season,
-    casos  = rpois(n(), lambda = lambda)
-  )
+cat("Edad promedio población")
+print(mean(poblacion$edad))
 
-# Agregar por región-semana (sumando edades)
-agg <- sim %>%
-  group_by(region, semana) %>%
-  summarise(
-    casos = sum(casos),
-    poblacion = first(poblacion),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    incidencia_100k = (casos / poblacion) * 100000,
-    semana_label = paste0("W", isoweek(semana))
-  )
+###############################################################################
+cat("\na. Verifique el tamaño de muestra. \n")
+nrow(muestra_simple)
 
-# Ordenar regiones por incidencia total (para un heatmap más informativo)
-orden_regiones <- agg %>%
+"\nb. Calcule la distribución de sexo y región."
+cat("\na.Distribución (muestra simple) - región:\n")
+print(prop_tab(muestra_simple$region))
+
+cat("\nb.Distribución (muestra simple) - sexo:\n")
+print(prop_tab(muestra_simple$sexo))
+
+cat("\nc.Edad promedio (muestra simple):\n")
+print(mean(muestra_simple$edad))
+
+cat("\nc. Compare estas distribuciones con la población total. \n")
+cat("\na.Distribución población) - región:\n")
+print(prop_tab(poblacion$region))
+
+cat("\nb.Distribución población - sexo:\n")
+print(prop_tab(poblacion$sexo))
+
+###############################################################################
+
+# 3) Muestreo estratificado por 'region'
+# Extraer una muestra estratificada de n = 100,
+# manteniendo proporciones similares por región (Urbana/Rural).
+# Usar dplyr: group_by() + sample_n() + ungroup()
+
+set.seed(789)
+
+n_total <- 100
+
+muestra_estratificada <- poblacion %>%
   group_by(region) %>%
-  summarise(total = sum(incidencia_100k), .groups = "drop") %>%
-  arrange(total) %>%
-  pull(region)
+  # tamaño por estrato proporcional al estrato en la población:
+  sample_n(size = round(n() / nrow(poblacion) * n_total)) %>%
+  ungroup()
 
-agg <- agg %>%
-  mutate(region = factor(region, levels = orden_regiones))
+nrow(muestra_estratificada)
 
-# Construimos el gráfico de mapa de calor o heatmap
-ggplot(agg, aes(x = semana, y = region, fill = incidencia_100k)) +
-  geom_tile(color = "gray", linewidth = 0.5) +
-  scale_fill_viridis_c(
-    option = "H",# Cambio a Virilis H
-    end = 1,
-    labels = label_number(accuracy = 0.1),
-    name = "Incidencia\n(por 100,000)"
-  ) +
-  guides(fill = guide_colourbar(barwidth = 1, barheight = 5))+ #Ancho y alto de la leyenda
-  scale_x_date(date_breaks = "1 week", date_labels = "W%V") +
-  labs(
-    title = "Heatmap de incidencia semanal por región",
-    subtitle = "Datos epidemiológicos simulados (vigilancia sindrómica)",
-    x = "Semana epidemiológica",
-    y = "Región",
-    caption = "Fuente: datos simulados"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    plot.title = element_text(hjust= 0.5, face= "bold", size= 16), # Cambio de formato del titulo
-    plot.subtitle = element_text(hjust= 0.5, face= "italic", size= 12), # y subtitulo
-    axis.text.x = element_text(angle = 45, hjust = 0.5, size= 11),
-    panel.grid = element_blank()
+# Nota:
+# Por el uso de round(), el tamaño final puede no ser EXACTAMENTE 100.
+# Esto se puede discutir metodológicamente y/o ajustar como extensión.
+
+#a. Distribución (muestra estratificada) - región:
+print(prop_tab(muestra_estratificada$region))
+
+#b. Distribución (muestra estratificada) - sexo:
+print(prop_tab(muestra_estratificada$sexo))
+
+#c. Edad promedio (muestra estratificada):
+print(mean(muestra_estratificada$edad))
+
+##############################################################################
+# 4) Comparación de resultados
+# Compare población vs. muestras en:
+# proporciones por región
+# proporciones por sexo
+# edad promedio
+
+comparacion <- data.frame(
+  conjunto = c("Población", "Muestra simple", "Muestra estratificada"),
+  n        = c(nrow(poblacion), nrow(muestra_simple), nrow(muestra_estratificada)),
+  edad_promedio = c(mean(poblacion$edad), mean(muestra_simple$edad), mean(muestra_estratificada$edad)),
+  prop_urbana = c(
+    prop.table(table(poblacion$region))["Urbana"],
+    prop.table(table(muestra_simple$region))["Urbana"],
+    prop.table(table(muestra_estratificada$region))["Urbana"]
+  ),
+  prop_rural = c(
+    prop.table(table(poblacion$region))["Rural"],
+    prop.table(table(muestra_simple$region))["Rural"],
+    prop.table(table(muestra_estratificada$region))["Rural"]
   )
+)
+
+# Redondeo para imprimir más claro
+comparacion$edad_promedio <- round(comparacion$edad_promedio, 2)
+comparacion$prop_urbana   <- round(comparacion$prop_urbana, 4)
+comparacion$prop_rural    <- round(comparacion$prop_rural, 4)
+
+print(comparacion, row.names = FALSE)
+
+
+# 5) Preguntas de análisis
+# ¿Qué diferencias observa entre la muestra aleatoria simple y la estratificada?
+cat("La distribución  según región en la población es de 36% en zonas rurales 
+    y 64% en zonas rurales. A su vez, existe un  un 52% de femeninas y un 48% 
+    de masculinos.
+    
+    Mientras que, en el muestreo simple, las zonas rurales representa un 34% y 
+    las zonas urbanas un 66%. Y existe existe un 62% de femeninas y un 38% de 
+    masculinos.
+    
+    Por otra parte, el muestreo estratificado muestra una distribución por 
+    región, donde un 36% es rural y un 64% es urbana. A su vez, presenta una 
+    muestra por sexo de un 43% femeninas y un 57% masculinos.
+    
+    Teniendo en cuenta lo anterior, la diferencia entre ambas muestras es 
+    el muestreo simple altera el porcentaje según región y el sexo con respecto
+    a la población en general. Mientras, que el muestreo estratificado logra 
+    representar muy bien la distribución por regiones y por sexo crea un 
+    porcentaje similar. 
+    
+    Asimismo, la edad promedio en la muestra simple es de 52 años, mientras que
+    en el muestreo estratificado es de 51 años. Y en la población general el 
+    promedio de edad es 51. Ambas muestras, andan bastante parecidas.
+    
+    ")
+
+# ¿Cuál método representa mejor la estructura de la población por región?
+("Por región la muestra más representativa es el muestreo estratificado. Dado 
+que, se obtienen porcentajes iguales a la población original.
+  
+  ")
+
+
+
+# ¿En qué escenarios de SIS sería preferible usar muestreo estratificado?
+("Cuando se realizan investigaciones en las cuales de se deben encuestar, 
+estudiar o evaluar  poblaciones de diferentes regiones o de diferentes grupos
+etarios.
+  ")
+
+
+# ¿Qué riesgos metodológicos existen al usar solo MAS en poblaciones heterogéneas?
+(" Uno de los mayores riesgos es que se pierdan la representatividad en las 
+poblaciones más pequeñas. Por eso, en esos casos es mejor utilizar el muestreo
+estrateficado, que aunque grupos pequeños se evaluén con grupos pequeños, todos
+puedan ser representados de forma equitativa
+  
+  ")
